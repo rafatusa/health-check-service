@@ -56,14 +56,20 @@ stages:
         run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Build image
         run: docker build -t "${{ steps.image.outputs.ref }}" .
-      # Install into a user-writable dir: /usr/local/bin is root-owned on
-      # GitHub-hosted runners and the install script runs unprivileged, so
-      # installing there exits 1 right after resolving the version.
+      # TRIVY_VERSION must be a tag that really exists in
+      # github.com/aquasecurity/trivy/releases. v0.58.1 was assumed and does
+      # NOT exist: the installer resolves the tag, then dies fetching a 404
+      # asset, and the piped `sh` surfaces only a bare exit 1.
+      # pipefail makes the installer's own failure propagate instead of being
+      # masked by the pipeline's exit status.
       - name: Install Trivy
+        env:
+          TRIVY_VERSION: v0.74.0
         run: |
+          set -o pipefail
           mkdir -p "$HOME/.local/bin"
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-            | sh -s -- -b "$HOME/.local/bin" v0.58.1
+            | sh -s -- -b "$HOME/.local/bin" "$TRIVY_VERSION"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/trivy" --version
       - name: Trivy image scan
