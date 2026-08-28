@@ -16,8 +16,13 @@ RUN mvn -B --no-transfer-progress package -DskipTests
 # ---- runtime stage: JRE only, no build toolchain in the shipped image ----
 FROM eclipse-temurin:17-jre-alpine
 
+# Base images lag Alpine's package index by days to weeks, so the shipped
+# openssl/libssl3/libcrypto3 are routinely a patch release behind and fail the
+# Trivy fixable-CVE gate (e.g. CVE-2026-14456: 3.5.7-r0 -> 3.5.8-r0).
+# Upgrading here picks up OS security patches on every rebuild instead of
+# pinning a base tag that goes stale again next month.
 # curl is required by the HEALTHCHECK below.
-RUN apk add --no-cache curl
+RUN apk upgrade --no-cache && apk add --no-cache curl
 
 # Run as a dedicated non-root user (CIS Docker 4.1).
 RUN addgroup -S app && adduser -S -G app app
