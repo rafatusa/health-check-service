@@ -154,10 +154,35 @@ stages:
           done
           echo "SSH never became reachable" >&2
           exit 1
+      # `scp -r src host:/tmp/puppet` is NOT idempotent across runs: when
+      # /tmp/puppet does not exist scp CREATES it and copies the contents in,
+      # but when it already exists (left by a previous run) scp nests the
+      # source INSIDE it as /tmp/puppet/puppet. `puppet apply` then keeps
+      # reading the FIRST run's stale manifest at /tmp/puppet/manifests/
+      # while every later upload lands at /tmp/puppet/puppet/manifests/ —
+      # so committed fixes silently never take effect and the same error
+      # repeats forever. Removing the destination first makes the copy
+      # idempotent: the manifest applied is always the one just checked out.
       - name: Copy Puppet manifests
         run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$SSH_USER@${{ steps.infra.outputs.ip }}" \
+            'rm -rf /tmp/puppet'
           scp -i ~/.ssh/deploy_key -o BatchMode=yes -r puppet \
             "$SSH_USER@${{ steps.infra.outputs.ip }}:/tmp/puppet"
+      - name: Verify the uploaded manifest is the one just checked out
+        run: |
+          LOCAL_SUM=$(sha256sum puppet/manifests/site.pp | cut -d' ' -f1)
+          REMOTE_SUM=$(ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$SSH_USER@${{ steps.infra.outputs.ip }}" \
+            'sha256sum /tmp/puppet/manifests/site.pp | cut -d" " -f1')
+          echo "local  : $LOCAL_SUM"
+          echo "remote : $REMOTE_SUM"
+          if [ "$LOCAL_SUM" != "$REMOTE_SUM" ]; then
+            echo "Uploaded manifest does not match the checked-out manifest" >&2
+            exit 1
+          fi
+          echo "Manifest checksums match"
       - name: Install Puppet
         run: |
           ssh -i ~/.ssh/deploy_key -o BatchMode=yes \

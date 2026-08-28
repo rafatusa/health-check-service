@@ -134,8 +134,17 @@ jobs:
         \   exit 0\n  fi\n  echo \"SSH not ready yet (attempt ${i}/30), retrying in\
         \ 10s\"\n  sleep 10\ndone\necho \"SSH never became reachable\" >&2\nexit 1\n"
     - name: Copy Puppet manifests
-      run: "scp -i ~/.ssh/deploy_key -o BatchMode=yes -r puppet \\\n  \"$SSH_USER@${{\
-        \ steps.infra.outputs.ip }}:/tmp/puppet\"\n"
+      run: "ssh -i ~/.ssh/deploy_key -o BatchMode=yes \\\n  \"$SSH_USER@${{ steps.infra.outputs.ip\
+        \ }}\" \\\n  'rm -rf /tmp/puppet'\nscp -i ~/.ssh/deploy_key -o BatchMode=yes\
+        \ -r puppet \\\n  \"$SSH_USER@${{ steps.infra.outputs.ip }}:/tmp/puppet\"\n"
+    - name: Verify the uploaded manifest is the one just checked out
+      run: "LOCAL_SUM=$(sha256sum puppet/manifests/site.pp | cut -d' ' -f1)\nREMOTE_SUM=$(ssh\
+        \ -i ~/.ssh/deploy_key -o BatchMode=yes \\\n  \"$SSH_USER@${{ steps.infra.outputs.ip\
+        \ }}\" \\\n  'sha256sum /tmp/puppet/manifests/site.pp | cut -d\" \" -f1')\n\
+        echo \"local  : $LOCAL_SUM\"\necho \"remote : $REMOTE_SUM\"\nif [ \"$LOCAL_SUM\"\
+        \ != \"$REMOTE_SUM\" ]; then\n  echo \"Uploaded manifest does not match the\
+        \ checked-out manifest\" >&2\n  exit 1\nfi\necho \"Manifest checksums match\"\
+        \n"
     - name: Install Puppet
       run: "ssh -i ~/.ssh/deploy_key -o BatchMode=yes \\\n  \"$SSH_USER@${{ steps.infra.outputs.ip\
         \ }}\" \\\n  'set -e\n   for i in $(seq 1 5); do\n     sudo apt-get update\
