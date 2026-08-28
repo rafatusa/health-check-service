@@ -23,7 +23,6 @@
     <checkstyle.plugin.version>3.6.0</checkstyle.plugin.version>
     <spotbugs.plugin.version>4.8.6.6</spotbugs.plugin.version>
     <jacoco.plugin.version>0.8.12</jacoco.plugin.version>
-    <dependencycheck.plugin.version>10.0.4</dependencycheck.plugin.version>
   </properties>
 
   <dependencies>
@@ -116,21 +115,15 @@
         </executions>
       </plugin>
 
-      <!-- OWASP Dependency Check: fails on High/Critical CVEs. -->
-      <plugin>
-        <groupId>org.owasp</groupId>
-        <artifactId>dependency-check-maven</artifactId>
-        <version>${dependencycheck.plugin.version}</version>
-        <configuration>
-          <failBuildOnCVSS>7</failBuildOnCVSS>
-          <assemblyAnalyzerEnabled>false</assemblyAnalyzerEnabled>
-          <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
-          <formats>
-            <format>HTML</format>
-            <format>JSON</format>
-          </formats>
-        </configuration>
-      </plugin>
+      <!-- NOTE: the OWASP dependency-check-maven plugin was REMOVED on
+           2026-08-28 at the user's request. The unkeyed NVD feed download
+           could not complete inside the CI runner's limits and blocked every
+           deploy. Dependency-level CVE scanning is currently NOT performed.
+           Container image scanning (Trivy, HIGH/CRITICAL, fixable-only)
+           still runs in the build_push pipeline stage.
+           To restore: re-add the plugin with failBuildOnCVSS=7 and provide an
+           NVD_API_KEY repo secret, ideally from a scheduled workflow rather
+           than the deploy critical path. -->
 
     </plugins>
   </build>
