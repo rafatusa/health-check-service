@@ -15,13 +15,19 @@
 # Every exec is guarded (onlyif/unless) so re-running the manifest is a no-op,
 # which is what makes recovery re-runs free.
 
-$app_image = $facts['app_image']
-$ghcr_user = $facts['ghcr_user']
-$container = 'health-check-service'
-$app_port  = 8080
+# NOTE ON NAMING: FACTER_<name> environment facts are already bound as
+# top-scope variables ($app_image, $ghcr_user) before this manifest is
+# evaluated. Puppet variables are IMMUTABLE, so assigning to those same names
+# here raises "Cannot reassign variable". The local copies below therefore use
+# distinct names. The explicit $facts[...] lookup is kept deliberately: it is
+# the form that remains correct under --strict_variables.
+$app_image_ref = $facts['app_image']
+$ghcr_username = $facts['ghcr_user']
+$container     = 'health-check-service'
+$app_port      = 8080
 
 # Fail fast and loudly rather than silently deploying an empty image ref.
-unless $app_image and $app_image != '' {
+unless $app_image_ref and $app_image_ref != '' {
   fail('FACTER_app_image must be set to the fully qualified image reference')
 }
 
@@ -57,7 +63,7 @@ service { 'docker':
 # INSIDE the shell, so it never appears in the command string, the process
 # table, or the Puppet log.
 exec { 'ghcr-login':
-  command   => "printf '%s' \"\$FACTER_ghcr_token\" | docker login ghcr.io -u '${ghcr_user}' --password-stdin",
+  command   => "printf '%s' \"\$FACTER_ghcr_token\" | docker login ghcr.io -u '${ghcr_username}' --password-stdin",
   provider  => shell,
   require   => Service['docker'],
   logoutput => false,
@@ -65,9 +71,9 @@ exec { 'ghcr-login':
 }
 
 exec { 'pull-app-image':
-  command => "docker pull '${app_image}'",
+  command => "docker pull '${app_image_ref}'",
   require => Exec['ghcr-login'],
-  unless  => "docker image inspect '${app_image}'",
+  unless  => "docker image inspect '${app_image_ref}'",
 }
 
 # Remove the previous container only when it is not already running this exact
@@ -76,12 +82,12 @@ exec { 'stop-old-container':
   command  => "docker rm -f '${container}'",
   provider => shell,
   onlyif   => "docker ps -a --filter name=^/${container}$ --format '{{.Names}}' | grep -q '^${container}$'",
-  unless   => "test \"\$(docker inspect -f '{{.Config.Image}}' '${container}' 2>/dev/null)\" = '${app_image}' && test \"\$(docker inspect -f '{{.State.Running}}' '${container}' 2>/dev/null)\" = 'true'",
+  unless   => "test \"\$(docker inspect -f '{{.Config.Image}}' '${container}' 2>/dev/null)\" = '${app_image_ref}' && test \"\$(docker inspect -f '{{.State.Running}}' '${container}' 2>/dev/null)\" = 'true'",
   require  => Exec['pull-app-image'],
 }
 
 exec { 'run-app-container':
-  command  => "docker run -d --name '${container}' --restart always -p 127.0.0.1:${app_port}:${app_port} -e APP_COMMIT='${app_image}' '${app_image}'",
+  command  => "docker run -d --name '${container}' --restart always -p 127.0.0.1:${app_port}:${app_port} -e APP_COMMIT='${app_image_ref}' '${app_image_ref}'",
   provider => shell,
   unless   => "docker ps --filter name=^/${container}$ --filter status=running --format '{{.Names}}' | grep -q '^${container}$'",
   require  => Exec['stop-old-container'],
@@ -98,7 +104,7 @@ file { '/etc/nginx/sites-enabled/default':
 # NOTE: the heredoc tag is UNQUOTED (@(NGINX)) which disables interpolation
 # entirely, so nginx's $host / $remote_addr survive verbatim. A quoted tag
 # would make Puppet try to evaluate them and fail with "Unknown variable".
-# The port is therefore substituted with inline_template rather than $-syntax.
+# The port is therefore hardcoded below rather than interpolated.
 file { '/etc/nginx/sites-available/health-check-service':
   ensure  => file,
   owner   => 'root',
