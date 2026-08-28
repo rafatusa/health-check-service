@@ -7,65 +7,85 @@
   <title>Health Check Service — Status</title>
   <style>
     /* ------------------------------------------------------------------
-       Neumorphic ("soft UI") theme.
+       Glassmorphic theme.
 
-       The whole language is: ONE background colour everywhere, and depth
-       comes only from a light shadow top-left plus a dark shadow
-       bottom-right. Raised surfaces use outer shadows; pressed surfaces
-       invert to inset. There are no borders anywhere.
+       The language is: a COLOURED gradient backdrop, with surfaces that
+       are semi-transparent, blurred (backdrop-filter), edged with a 1px
+       light hairline, and lifted by a soft drop shadow. The hairline is
+       not decoration — it is the "edge of the glass" and the style reads
+       as flat plastic without it.
 
-       Deliberate exceptions, because neumorphism is hostile to
-       accessibility and this is an operations dashboard:
-         - text colours keep WCAG AA contrast, not washed-out greys
+       Glass needs something worth seeing THROUGH it, so the body carries
+       soft colour blobs behind the panels. Over a flat colour this style
+       degrades into grey boxes.
+
+       Deliberate exceptions, because glass is hostile to contrast and
+       this is an operations dashboard:
+         - surface fills stay opaque ENOUGH to carry WCAG AA body text
          - status colours stay saturated and are ALWAYS paired with a word
-         - :focus-visible keeps a hard 2px outline (a soft focus ring is
-           effectively no focus ring)
+         - the error panel keeps a solid left rail (survives no-blur)
+         - :focus-visible keeps a hard 2px outline
+         - @supports fallback: no backdrop-filter => more opaque fill, so
+           panels can never fade into the background
        ------------------------------------------------------------------ */
     :root {
       color-scheme: light dark;
 
-      /* Mid-tone slate: neumorphism cannot render on near-black. */
-      --bg: #2b3242;
-      --light: rgba(255, 255, 255, .07);   /* top-left highlight */
-      --dark: rgba(0, 0, 0, .45);          /* bottom-right shadow */
+      /* backdrop */
+      --bg: #131a2b;
+      --blob-a: rgba(56, 189, 248, .34);   /* cyan   */
+      --blob-b: rgba(129, 140, 248, .32);  /* indigo */
+      --blob-c: rgba(45, 212, 191, .22);   /* teal   */
 
-      --text: #eef2f8;
-      --muted: #c3ccda;          /* 8.9:1 on --bg */
-      --faint: #a5b1c2;          /* 6.2:1 on --bg */
-      --accent: #7dd3fc;         /* 7.5:1 on --bg */
+      /* glass surfaces */
+      --glass: rgba(255, 255, 255, .085);
+      --glass-strong: rgba(255, 255, 255, .13);
+      --glass-solid: rgba(30, 41, 62, .90);   /* no-backdrop-filter fallback */
+      --edge: rgba(255, 255, 255, .20);
+      --edge-strong: rgba(255, 255, 255, .34);
+      --lift: 0 8px 28px rgba(5, 10, 24, .40);
+      --lift-sm: 0 4px 16px rgba(5, 10, 24, .32);
+      --blur: blur(16px) saturate(150%);
+
+      --text: #f2f6fc;
+      --muted: #ccd6e6;          /* AA on the glass fill over --bg */
+      --faint: #aab7cc;
+      --accent: #8fdcff;
 
       --up: #34d399;
       --pending: #fbbf24;
       --down: #f87171;
-      --focus: #7dd3fc;
+      --focus: #8fdcff;
 
-      --r-lg: 1.25rem;
-      --r-md: .9rem;
-      --r-sm: .7rem;
-
-      /* raised / inset shadow pairs — the entire visual system */
-      --up-shadow:  6px 6px 14px var(--dark), -6px -6px 14px var(--light);
-      --up-shadow-sm: 4px 4px 9px var(--dark), -4px -4px 9px var(--light);
-      --in-shadow:  inset 5px 5px 11px var(--dark), inset -5px -5px 11px var(--light);
-      --in-shadow-sm: inset 3px 3px 7px var(--dark), inset -3px -3px 7px var(--light);
+      --r-lg: 1.15rem;
+      --r-md: .85rem;
+      --r-sm: .6rem;
     }
 
     @media (prefers-color-scheme: light) {
       :root {
-        /* Warm grey: neumorphism cannot render on pure white either. */
-        --bg: #e4e8ef;
-        --light: rgba(255, 255, 255, .95);
-        --dark: rgba(163, 173, 190, .65);
+        --bg: #e8ecf7;
+        --blob-a: rgba(56, 189, 248, .40);
+        --blob-b: rgba(139, 122, 248, .34);
+        --blob-c: rgba(45, 212, 191, .26);
 
-        --text: #1b2333;
-        --muted: #46516a;        /* 8.1:1 on --bg */
-        --faint: #5c6880;        /* 5.4:1 on --bg */
-        --accent: #0b5f92;       /* 6.4:1 on --bg */
+        --glass: rgba(255, 255, 255, .48);
+        --glass-strong: rgba(255, 255, 255, .66);
+        --glass-solid: rgba(255, 255, 255, .93);
+        --edge: rgba(255, 255, 255, .85);
+        --edge-strong: rgba(255, 255, 255, .95);
+        --lift: 0 8px 26px rgba(58, 74, 110, .18);
+        --lift-sm: 0 4px 14px rgba(58, 74, 110, .14);
+
+        --text: #141c2e;
+        --muted: #3d4863;          /* 8.3:1 on the light glass fill */
+        --faint: #55617c;          /* 5.6:1 */
+        --accent: #08557f;         /* 6.9:1 */
 
         --up: #0f8a5f;
-        --pending: #9a6206;
-        --down: #c02626;
-        --focus: #0b5f92;
+        --pending: #96600a;
+        --down: #bf2222;
+        --focus: #08557f;
       }
     }
 
@@ -78,10 +98,18 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      /* single flat surface — every element is extruded from this */
-      background: var(--bg);
       color: var(--text);
       line-height: 1.5;
+
+      /* The backdrop the glass reads against: three soft colour blobs on a
+         base tone. fixed attachment keeps them still while the page scrolls. */
+      background-color: var(--bg);
+      background-image:
+        radial-gradient(42rem 34rem at 12% 8%,   var(--blob-a), transparent 62%),
+        radial-gradient(38rem 32rem at 88% 22%,  var(--blob-b), transparent 60%),
+        radial-gradient(46rem 38rem at 62% 108%, var(--blob-c), transparent 62%);
+      background-attachment: fixed;
+      background-repeat: no-repeat;
     }
 
     main { max-width: 46rem; width: 100%; padding: 2.5rem 1.25rem; }
@@ -97,30 +125,61 @@
     }
     .sub { color: var(--muted); margin: 0; font-size: .95rem; }
 
+    /* ---- glass primitives -------------------------------------------- */
+    /* Default assumes NO backdrop-filter: use the opaque fallback fill so
+       the page is readable everywhere. The @supports block below swaps in
+       the real translucent glass where blur is available. */
+    .status-line,
+    .error,
+    .metric,
+    .card,
+    button,
+    footer {
+      background: var(--glass-solid);
+      border: 1px solid var(--edge);
+      box-shadow: var(--lift-sm);
+    }
+
+    @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .status-line,
+      .error,
+      .metric,
+      .card,
+      button,
+      footer {
+        background: var(--glass);
+        -webkit-backdrop-filter: var(--blur);
+        backdrop-filter: var(--blur);
+      }
+      .metric, .card { box-shadow: var(--lift); }
+    }
+
     /* ---- status indicator ------------------------------------------- */
-    /* Extruded well holding a coloured light. The colour stays saturated
-       and is never the only signal — .status-word carries the same state. */
+    /* A glass bead holding a coloured light. The colour stays saturated and
+       is never the only signal — .status-word carries the same state. */
     .dot {
       flex: 0 0 auto;
       width: 1.5rem;
       height: 1.5rem;
       border-radius: 50%;
-      background: var(--bg);
-      box-shadow: var(--in-shadow-sm);
+      background: var(--glass-strong);
+      border: 1px solid var(--edge-strong);
+      -webkit-backdrop-filter: var(--blur);
+      backdrop-filter: var(--blur);
       display: inline-grid;
       place-items: center;
     }
     .dot::after {
       content: "";
-      width: .62rem;
-      height: .62rem;
+      width: .6rem;
+      height: .6rem;
       border-radius: 50%;
       background: var(--pending);
-      box-shadow: 0 0 9px 1px var(--pending);
+      box-shadow: 0 0 10px 2px var(--pending);
     }
-    .dot[data-state="up"]::after      { background: var(--up);      box-shadow: 0 0 9px 1px var(--up); }
-    .dot[data-state="pending"]::after { background: var(--pending); box-shadow: 0 0 9px 1px var(--pending); animation: pulse 1.4s ease-in-out infinite; }
-    .dot[data-state="down"]::after    { background: var(--down);    box-shadow: 0 0 9px 1px var(--down); }
+    .dot[data-state="up"]::after      { background: var(--up);      box-shadow: 0 0 10px 2px var(--up); }
+    .dot[data-state="pending"]::after { background: var(--pending); box-shadow: 0 0 10px 2px var(--pending); animation: pulse 1.4s ease-in-out infinite; }
+    .dot[data-state="down"]::after    { background: var(--down);    box-shadow: 0 0 10px 2px var(--down); }
 
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
     @media (prefers-reduced-motion: reduce) {
@@ -136,8 +195,6 @@
       margin: 0 0 1.6rem;
       padding: .85rem 1.15rem;
       border-radius: var(--r-md);
-      background: var(--bg);
-      box-shadow: var(--in-shadow-sm);
       font-size: .95rem;
     }
     .status-word { font-weight: 700; letter-spacing: .01em; }
@@ -146,15 +203,13 @@
     .status-word[data-state="down"]    { color: var(--down); }
     .status-detail { color: var(--faint); font-size: .85rem; }
 
-    /* Errors get a soft inset well plus a saturated left rail — the rail
-       is what survives if shadows are not rendered at all. */
+    /* Errors keep a saturated left rail — the rail is what survives if the
+       blur and the translucent fill are not rendered at all. */
     .error {
       margin: 0 0 1.6rem;
       padding: .9rem 1.1rem;
       border-radius: var(--r-md);
       border-left: 4px solid var(--down);
-      background: var(--bg);
-      box-shadow: var(--in-shadow-sm);
       color: var(--text);
       font-size: .875rem;
     }
@@ -173,9 +228,7 @@
     }
     .metric {
       padding: 1.1rem 1.15rem;
-      background: var(--bg);
       border-radius: var(--r-lg);
-      box-shadow: var(--up-shadow);
     }
     .metric dt {
       margin: 0 0 .35rem;
@@ -206,21 +259,25 @@
       margin: 0 0 .8rem;
       font-weight: 700;
     }
-    /* Raised by default; presses INTO the surface on hover/active — the
-       core neumorphic interaction. */
+    /* Glass lifts TOWARD the viewer on hover — brighter fill, brighter
+       edge, larger shadow. (Neumorphism pressed inward; glass floats.) */
     .card {
       display: block;
       padding: 1rem 1.2rem;
       margin-bottom: 1rem;
-      background: var(--bg);
       border-radius: var(--r-lg);
-      box-shadow: var(--up-shadow);
       text-decoration: none;
       color: inherit;
-      transition: box-shadow .18s ease;
+      transition: background-color .18s ease, border-color .18s ease,
+                  box-shadow .18s ease, transform .18s ease;
     }
-    .card:hover  { box-shadow: var(--in-shadow); }
-    .card:active { box-shadow: var(--in-shadow); }
+    .card:hover {
+      background-color: var(--glass-strong);
+      border-color: var(--edge-strong);
+      box-shadow: var(--lift);
+      transform: translateY(-2px);
+    }
+    .card:active { transform: translateY(0); box-shadow: var(--lift-sm); }
     .ep {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: .92rem;
@@ -234,23 +291,27 @@
       font: inherit;
       font-weight: 600;
       color: var(--text);
-      background: var(--bg);
-      border: 0;
       border-radius: var(--r-md);
       padding: .7rem 1.4rem;
       cursor: pointer;
-      box-shadow: var(--up-shadow-sm);
-      transition: box-shadow .18s ease;
+      transition: background-color .18s ease, border-color .18s ease,
+                  box-shadow .18s ease, transform .18s ease;
     }
-    button:hover:not(:disabled)  { box-shadow: var(--in-shadow-sm); }
-    button:active:not(:disabled) { box-shadow: var(--in-shadow); }
+    button:hover:not(:disabled) {
+      background-color: var(--glass-strong);
+      border-color: var(--edge-strong);
+      box-shadow: var(--lift);
+      transform: translateY(-1px);
+    }
+    button:active:not(:disabled) { transform: translateY(0); box-shadow: var(--lift-sm); }
     button:disabled {
       cursor: progress;
       color: var(--faint);
-      box-shadow: var(--in-shadow-sm);
+      opacity: .75;
+      box-shadow: none;
     }
 
-    /* Deliberately NOT neumorphic: a soft focus ring is no focus ring. */
+    /* Deliberately NOT glass: a translucent focus ring is no focus ring. */
     :focus-visible {
       outline: 2px solid var(--focus);
       outline-offset: 3px;
@@ -267,8 +328,6 @@
       margin-top: 2.25rem;
       padding: 1rem 1.15rem;
       border-radius: var(--r-md);
-      background: var(--bg);
-      box-shadow: var(--in-shadow-sm);
       color: var(--faint);
       font-size: .8rem;
     }
@@ -277,8 +336,7 @@
       main { padding: 1.75rem 1rem; }
       h1 { font-size: 1.35rem; }
       .grid { gap: .9rem; }
-      /* soften shadow spread so tiles don't collide on narrow screens */
-      .metric, .card { box-shadow: var(--up-shadow-sm); }
+      .metric, .card { box-shadow: var(--lift-sm); }
     }
   </style>
 </head>
