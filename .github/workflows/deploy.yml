@@ -56,8 +56,9 @@ jobs:
     - name: Build image
       run: docker build -t "${{ steps.image.outputs.ref }}" .
     - name: Install Trivy
-      run: "curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh\
-        \ \\\n  | sh -s -- -b /usr/local/bin v0.58.1\ntrivy --version\n"
+      run: "mkdir -p \"$HOME/.local/bin\"\ncurl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh\
+        \ \\\n  | sh -s -- -b \"$HOME/.local/bin\" v0.58.1\necho \"$HOME/.local/bin\"\
+        \ >> \"$GITHUB_PATH\"\n\"$HOME/.local/bin/trivy\" --version\n"
     - name: Trivy image scan
       run: "trivy image \\\n  --severity HIGH,CRITICAL \\\n  --ignore-unfixed \\\n\
         \  --exit-code 1 \\\n  --format table \\\n  --no-progress \\\n  \"${{ steps.image.outputs.ref\
