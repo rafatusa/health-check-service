@@ -3,52 +3,434 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Health Check Service</title>
+  <meta name="description" content="Live status dashboard for the Health Check Service."/>
+  <title>Health Check Service — Status</title>
   <style>
-    :root { color-scheme: light dark; }
+    :root {
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --border: #334155;
+      --border-hi: #64748b;
+      --text: #e2e8f0;
+      --muted: #aab8cc;          /* 7.0:1 on --panel — AA for body text */
+      --faint: #94a3b8;          /* 4.9:1 on --panel — AA, small meta only */
+      --accent: #7dd3fc;
+      --up: #22c55e;
+      --pending: #f59e0b;
+      --down: #ef4444;
+      --focus: #7dd3fc;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f1f5f9;
+        --panel: #ffffff;
+        --border: #cbd5e1;
+        --border-hi: #94a3b8;
+        --text: #0f172a;
+        --muted: #475569;        /* 7.4:1 on white */
+        --faint: #64748b;        /* 5.1:1 on white */
+        --accent: #0369a1;
+        --focus: #0369a1;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
     body {
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      margin: 0; min-height: 100vh; display: flex; align-items: center;
-      justify-content: center; background: #0f172a; color: #e2e8f0;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
     }
-    main { max-width: 46rem; padding: 2.5rem 1.5rem; width: 100%; }
-    h1 { font-size: 1.75rem; margin: 0 0 .35rem; letter-spacing: -.01em; }
-    .sub { color: #94a3b8; margin: 0 0 2rem; font-size: .95rem; }
+
+    main { max-width: 46rem; width: 100%; padding: 2.5rem 1.25rem; }
+
+    header { margin-bottom: 1.75rem; }
+    h1 {
+      font-size: 1.65rem;
+      margin: 0 0 .3rem;
+      letter-spacing: -.01em;
+      display: flex;
+      align-items: center;
+      gap: .6rem;
+    }
+    .sub { color: var(--muted); margin: 0; font-size: .95rem; }
+
+    /* ---- status indicator ------------------------------------------- */
     .dot {
-      display: inline-block; width: .6rem; height: .6rem; border-radius: 50%;
-      background: #22c55e; margin-right: .5rem; vertical-align: middle;
+      flex: 0 0 auto;
+      width: .7rem;
+      height: .7rem;
+      border-radius: 50%;
+      background: var(--pending);
+      box-shadow: 0 0 0 0 currentColor;
+    }
+    .dot[data-state="up"]      { background: var(--up); }
+    .dot[data-state="pending"] { background: var(--pending); animation: pulse 1.4s ease-in-out infinite; }
+    .dot[data-state="down"]    { background: var(--down); }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+    @media (prefers-reduced-motion: reduce) {
+      .dot[data-state="pending"] { animation: none; }
+      * { transition: none !important; }
+    }
+
+    .status-line {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: .5rem;
+      margin: 0 0 1.5rem;
+      font-size: .95rem;
+    }
+    .status-word { font-weight: 600; }
+    .status-word[data-state="up"]      { color: var(--up); }
+    .status-word[data-state="pending"] { color: var(--pending); }
+    .status-word[data-state="down"]    { color: var(--down); }
+    .status-detail { color: var(--faint); font-size: .85rem; }
+
+    .error {
+      margin: 0 0 1.5rem;
+      padding: .8rem 1rem;
+      border: 1px solid var(--down);
+      border-radius: .6rem;
+      background: color-mix(in srgb, var(--down) 12%, transparent);
+      color: var(--text);
+      font-size: .875rem;
+    }
+    .error[hidden] { display: none; }
+    .error code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    /* ---- metric grid -------------------------------------------------- */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+      gap: .75rem;
+      margin-bottom: 1.75rem;
+    }
+    .metric {
+      padding: .9rem 1rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: .6rem;
+    }
+    .metric dt {
+      margin: 0 0 .3rem;
+      font-size: .72rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--faint);
+    }
+    .metric dd {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      overflow-wrap: anywhere;
+    }
+    .metric dd.mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .9rem;
+      font-weight: 500;
+    }
+
+    /* ---- endpoint links ---------------------------------------------- */
+    h2 {
+      font-size: .78rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--faint);
+      margin: 0 0 .6rem;
+      font-weight: 600;
     }
     .card {
-      display: block; padding: 1rem 1.15rem; margin-bottom: .85rem;
-      background: #1e293b; border: 1px solid #334155; border-radius: .6rem;
-      text-decoration: none; color: inherit; transition: border-color .15s;
+      display: block;
+      padding: .85rem 1.1rem;
+      margin-bottom: .6rem;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: .6rem;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color .15s;
     }
-    .card:hover { border-color: #64748b; }
-    .ep { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-          font-size: .95rem; color: #7dd3fc; }
-    .desc { color: #94a3b8; font-size: .875rem; margin-top: .3rem; }
-    footer { margin-top: 2rem; color: #64748b; font-size: .8rem; }
+    .card:hover { border-color: var(--border-hi); }
+    .ep {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .92rem;
+      color: var(--accent);
+    }
+    .desc { color: var(--muted); font-size: .85rem; margin-top: .25rem; }
+
+    button {
+      font: inherit;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: .5rem;
+      padding: .45rem .9rem;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+    button:hover { border-color: var(--border-hi); }
+
+    :focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+      border-radius: .35rem;
+    }
+
+    .sr-only {
+      position: absolute; width: 1px; height: 1px;
+      padding: 0; margin: -1px; overflow: hidden;
+      clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
+
+    footer {
+      margin-top: 2rem;
+      color: var(--faint);
+      font-size: .8rem;
+      border-top: 1px solid var(--border);
+      padding-top: 1rem;
+    }
+
+    @media (max-width: 30rem) {
+      main { padding: 1.75rem 1rem; }
+      h1 { font-size: 1.35rem; }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1><span class="dot"></span>Health Check Service</h1>
-    <p class="sub">A tiny Spring Boot service reporting its own liveness and build provenance.</p>
+    <header>
+      <h1>
+        <span class="dot" id="dot" data-state="pending" aria-hidden="true"></span>
+        Health Check Service
+      </h1>
+      <p class="sub">Live status, uptime and build provenance for this instance.</p>
+    </header>
 
-    <a class="card" href="/health">
-      <div class="ep">GET /health</div>
-      <div class="desc">Liveness status, process uptime, and the time of the check.</div>
-    </a>
+    <p class="status-line" id="status" role="status" aria-live="polite">
+      <span class="status-word" id="status-word" data-state="pending">Checking…</span>
+      <span class="status-detail" id="status-detail">contacting /health</span>
+    </p>
 
-    <a class="card" href="/version">
-      <div class="ep">GET /version</div>
-      <div class="desc">Application version, the image the container was built from, and the JVM version.</div>
-    </a>
+    <div class="error" id="error" role="alert" hidden>
+      <strong>Health check failed.</strong>
+      <span id="error-text"></span>
+    </div>
+
+    <h2 id="metrics-heading">Runtime</h2>
+    <dl class="grid" aria-labelledby="metrics-heading">
+      <div class="metric">
+        <dt>Uptime</dt>
+        <dd id="m-uptime">—</dd>
+      </div>
+      <div class="metric">
+        <dt>Version</dt>
+        <dd id="m-version">—</dd>
+      </div>
+      <div class="metric">
+        <dt>Java</dt>
+        <dd id="m-java">—</dd>
+      </div>
+      <div class="metric" style="grid-column: 1 / -1;">
+        <dt>Image / commit</dt>
+        <dd class="mono" id="m-commit">—</dd>
+      </div>
+    </dl>
+
+    <h2 id="endpoints-heading">Endpoints</h2>
+    <div aria-labelledby="endpoints-heading">
+      <a class="card" href="/health">
+        <span class="ep">GET /health</span>
+        <span class="desc">Liveness status, process uptime, and the time of the check.</span>
+      </a>
+      <a class="card" href="/version">
+        <span class="ep">GET /version</span>
+        <span class="desc">Application version, the image the container was built from, and the JVM version.</span>
+      </a>
+    </div>
+
+    <p style="margin-top:1.25rem;">
+      <button type="button" id="refresh">Refresh now</button>
+      <span class="sr-only" id="refresh-hint">Re-runs the health check immediately.</span>
+    </p>
 
     <footer>
       Java 17 &middot; Spring Boot 3 &middot; Docker &middot; nginx &middot; AWS EC2
       <br/>Deployed by UDAP.
     </footer>
   </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var POLL_MS = 15000;
+      var TIMEOUT_MS = 5000;
+
+      var el = {
+        dot: document.getElementById("dot"),
+        word: document.getElementById("status-word"),
+        detail: document.getElementById("status-detail"),
+        error: document.getElementById("error"),
+        errorText: document.getElementById("error-text"),
+        uptime: document.getElementById("m-uptime"),
+        version: document.getElementById("m-version"),
+        java: document.getElementById("m-java"),
+        commit: document.getElementById("m-commit"),
+        refresh: document.getElementById("refresh")
+      };
+
+      // Values are written with textContent only — never innerHTML — so
+      // endpoint output can never inject markup into this page.
+      function setText(node, value) {
+        node.textContent = (value === undefined || value === null || value === "")
+          ? "—"
+          : String(value);
+      }
+
+      function setState(state, word, detail) {
+        el.dot.setAttribute("data-state", state);
+        el.word.setAttribute("data-state", state);
+        el.word.textContent = word;
+        el.detail.textContent = detail;
+      }
+
+      function showError(message) {
+        el.errorText.textContent = " " + message;
+        el.error.hidden = false;
+      }
+
+      function clearError() {
+        el.error.hidden = true;
+        el.errorText.textContent = "";
+      }
+
+      function humaniseUptime(totalSeconds) {
+        var s = Number(totalSeconds);
+        if (!isFinite(s) || s < 0) { return null; }
+        s = Math.floor(s);
+        var d = Math.floor(s / 86400);
+        var h = Math.floor((s % 86400) / 3600);
+        var m = Math.floor((s % 3600) / 60);
+        var sec = s % 60;
+        if (d > 0) { return d + "d " + h + "h"; }
+        if (h > 0) { return h + "h " + m + "m"; }
+        if (m > 0) { return m + "m " + sec + "s"; }
+        return sec + "s";
+      }
+
+      function formatClock(iso) {
+        var t = new Date(iso);
+        if (isNaN(t.getTime())) { return null; }
+        return t.toLocaleTimeString();
+      }
+
+      // fetch with a hard timeout: a hung request must surface as DOWN,
+      // never leave a stale green indicator on screen.
+      function getJson(path) {
+        var controller = new AbortController();
+        var timer = setTimeout(function () { controller.abort(); }, TIMEOUT_MS);
+        return fetch(path, {
+          signal: controller.signal,
+          cache: "no-store",
+          headers: { "Accept": "application/json" }
+        }).then(function (res) {
+          if (!res.ok) {
+            throw new Error(path + " returned HTTP " + res.status);
+          }
+          return res.json();
+        }).finally(function () {
+          clearTimeout(timer);
+        });
+      }
+
+      function refreshVersion() {
+        return getJson("/version").then(function (data) {
+          setText(el.version, data.version);
+          setText(el.java, data.javaVersion);
+          setText(el.commit, data.commit);
+        }).catch(function () {
+          // /version is provenance, not liveness — a failure here must not
+          // colour the health indicator. Leave the placeholders in place.
+        });
+      }
+
+      function refreshHealth() {
+        setState("pending", "Checking…", "contacting /health");
+        el.refresh.disabled = true;
+
+        return getJson("/health").then(function (data) {
+          var up = data.status === "UP";
+          var uptime = humaniseUptime(data.uptimeSeconds);
+          var at = formatClock(data.checkedAt);
+
+          setText(el.uptime, uptime);
+
+          if (up) {
+            clearError();
+            setState("up", "Operational",
+              at ? "last checked " + at : "last checked just now");
+          } else {
+            setState("down", "Degraded", "reported status: " + String(data.status));
+            showError("Service reported status “" + String(data.status) + "”.");
+          }
+        }).catch(function (err) {
+          var msg = (err && err.name === "AbortError")
+            ? "No response within " + (TIMEOUT_MS / 1000) + "s."
+            : (err && err.message ? err.message : "Unreachable.");
+          setState("down", "Unreachable", "health check failed");
+          setText(el.uptime, null);
+          showError(msg);
+        }).finally(function () {
+          el.refresh.disabled = false;
+        });
+      }
+
+      function refreshAll() {
+        refreshVersion();
+        return refreshHealth();
+      }
+
+      el.refresh.addEventListener("click", refreshAll);
+
+      // Pause polling while the tab is hidden; refresh immediately on return
+      // so a backgrounded tab never shows a stale "Operational".
+      var timerId = null;
+      function startPolling() {
+        if (timerId === null) {
+          timerId = setInterval(refreshHealth, POLL_MS);
+        }
+      }
+      function stopPolling() {
+        if (timerId !== null) {
+          clearInterval(timerId);
+          timerId = null;
+        }
+      }
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+          stopPolling();
+        } else {
+          refreshHealth();
+          startPolling();
+        }
+      });
+
+      refreshAll();
+      startPolling();
+    }());
+  </script>
 </body>
 </html>
