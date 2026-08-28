@@ -62,18 +62,34 @@ service { 'docker':
 # The token is read from the inherited FACTER_ghcr_token environment variable
 # INSIDE the shell, so it never appears in the command string, the process
 # table, or the Puppet log.
+#
+# NOTE ON THE GUARD: this exec is deliberately UNGUARDED and runs on every
+# apply. The previous guard was `unless test -f /root/.docker/config.json`,
+# which tested the wrong thing: the file's existence proves a login happened
+# ONCE, not that the stored credential is still usable. The GHCR token minted
+# for a workflow run is short-lived, so on the next deploy the guard matched,
+# the login was skipped, and `docker pull` failed with "denied" using the
+# previous run's expired credential.
+#
+# A login is cheap, has no side effect beyond refreshing the credential, and
+# is reported as a no-op change; correctness here matters more than avoiding
+# one idempotent write. Desired state is "a VALID credential for ghcr.io",
+# which cannot be asserted by testing for a file.
 exec { 'ghcr-login':
   command   => "printf '%s' \"\$FACTER_ghcr_token\" | docker login ghcr.io -u '${ghcr_username}' --password-stdin",
   provider  => shell,
   require   => Service['docker'],
   logoutput => false,
-  unless    => 'test -f /root/.docker/config.json',
 }
 
+# Always attempt the pull. The previous `unless docker image inspect` guard
+# meant a host that already held the SHA tag never re-contacted the registry;
+# combined with the skipped login that masked the credential failure. Docker
+# short-circuits on an already-present digest anyway, so the cost is one
+# manifest request.
 exec { 'pull-app-image':
   command => "docker pull '${app_image_ref}'",
   require => Exec['ghcr-login'],
-  unless  => "docker image inspect '${app_image_ref}'",
 }
 
 # Remove the previous container only when it is not already running this exact
