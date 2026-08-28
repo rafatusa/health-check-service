@@ -1,0 +1,13 @@
+.git
+.github
+.gitignore
+.udap
+docs
+infra
+puppet
+target
+*.md
+.env
+.env.*
+*.log
+dependency-check-report.*

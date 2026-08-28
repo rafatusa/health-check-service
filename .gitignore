@@ -1,0 +1,6 @@
+target/
+.terraform/
+*.tfstate*
+dependency-check-report.*
+*.log
+.DS_Store

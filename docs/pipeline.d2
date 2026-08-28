@@ -1,0 +1,66 @@
+# Delivery pipeline for the Health Check Service.
+# Rendered from .udap/pipeline.yaml — every node below is a real stage.
+#
+# Render locally with:  d2 docs/pipeline.d2 docs/pipeline.svg
+
+direction: right
+
+quality: Quality Gates {
+  style.fill: "#f8fafc"
+
+  lint: lint\nCheckstyle {
+    shape: rectangle
+  }
+  test: test\nJUnit + JaCoCo + SpotBugs {
+    shape: rectangle
+  }
+  security: security\nOWASP Dependency Check {
+    shape: rectangle
+  }
+}
+
+image: build_push\nDocker build -> Trivy scan -> GHCR {
+  shape: rectangle
+  style.fill: "#dbeafe"
+}
+
+delivery: Delivery {
+  style.fill: "#f8fafc"
+
+  provision: provision\nTerraform apply (EC2 + EIP + SG) {
+    shape: rectangle
+  }
+  configure: configure\nPuppet apply (Docker + nginx) {
+    shape: rectangle
+  }
+  verify: verify\nSmoke tests /health /version / {
+    shape: rectangle
+  }
+}
+
+registry: GHCR {
+  shape: cylinder
+  style.fill: "#e0e7ff"
+}
+
+state: S3 tfstate {
+  shape: cylinder
+  style.fill: "#e0e7ff"
+}
+
+ec2: EC2 instance {
+  shape: rectangle
+  style.fill: "#dcfce7"
+}
+
+quality.lint -> quality.test: passes
+quality.test -> quality.security: passes
+quality.security -> image: coverage + CVE gates green
+image -> registry: push image:sha
+image -> delivery.provision: image ready
+delivery.provision -> delivery.configure: public_ip
+delivery.configure -> delivery.verify: container running
+delivery.provision <-> state: read/write state
+registry -> delivery.configure: docker pull image:sha
+delivery.configure -> ec2: installs Docker + nginx
+delivery.verify -> ec2: HTTP 200 on /health and /version

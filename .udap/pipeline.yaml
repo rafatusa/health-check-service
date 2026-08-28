@@ -1,0 +1,257 @@
+version: 1
+name: health-check-service
+vcs: github
+
+stages:
+  - id: lint
+    kind: lint
+    timeout_minutes: 15
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Checkstyle
+        run: mvn -B --no-transfer-progress checkstyle:check
+
+  - id: test
+    kind: test
+    needs: [lint]
+    timeout_minutes: 20
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: JUnit tests and JaCoCo coverage gate
+        run: mvn -B --no-transfer-progress verify
+      - name: SpotBugs
+        run: mvn -B --no-transfer-progress spotbugs:check
+
+  - id: security
+    kind: security
+    needs: [test]
+    timeout_minutes: 45
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      # The NVD feed is large and slow to download. Caching it keeps reruns
+      # fast and avoids re-hitting NVD's rate limiter on every push.
+      - name: Cache NVD database
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/owasp/dependency-check-data
+          key: nvd-data-${{ github.run_id }}
+          restore-keys: nvd-data-
+      - name: OWASP Dependency Check
+        env:
+          # Optional: set an NVD_API_KEY repo secret to lift NVD rate limits.
+          # Without it the plugin still works, just slower on a cold cache.
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          if [ -n "$NVD_API_KEY" ]; then
+            mvn -B --no-transfer-progress dependency-check:check \
+              -Dnvd.api.key="$NVD_API_KEY"
+          else
+            echo "NVD_API_KEY not set — running unkeyed (slower, rate limited)."
+            mvn -B --no-transfer-progress dependency-check:check
+          fi
+
+  - id: build_push
+    kind: build_push
+    needs: [security]
+    timeout_minutes: 30
+    steps:
+      - name: Resolve lowercase image reference
+        id: image
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "ref=ghcr.io/${REPO_LC}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build image
+        run: docker build -t "${{ steps.image.outputs.ref }}" .
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.58.1
+          trivy --version
+      - name: Trivy image scan
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --format table \
+            --no-progress \
+            "${{ steps.image.outputs.ref }}"
+      - name: Push image
+        run: docker push "${{ steps.image.outputs.ref }}"
+
+  - id: provision
+    kind: provision
+    needs: [build_push]
+    timeout_minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: us-east-1
+      TF_VAR_project_name: ${{ secrets.PROJECT_NAME }}
+      TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+    steps:
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: 'false'
+      - name: Terraform init
+        run: |
+          cd infra
+          terraform init -input=false -reconfigure \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ secrets.PROJECT_NAME }}/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION"
+      - name: Terraform apply
+        run: |
+          cd infra
+          terraform apply -auto-approve -input=false
+
+  - id: configure
+    kind: configure
+    needs: [provision]
+    timeout_minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: us-east-1
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+    steps:
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: 'false'
+      - name: Read instance address
+        id: infra
+        run: |
+          cd infra
+          terraform init -input=false -reconfigure \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ secrets.PROJECT_NAME }}/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION"
+          echo "ip=$(terraform output -raw public_ip)" >> "$GITHUB_OUTPUT"
+      - name: Write SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "${{ steps.infra.outputs.ip }}" >> ~/.ssh/known_hosts
+      - name: Wait for SSH to accept connections
+        run: |
+          for i in $(seq 1 30); do
+            if ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o ConnectTimeout=10 \
+                 "$SSH_USER@${{ steps.infra.outputs.ip }}" true 2>/dev/null; then
+              echo "SSH is up after ${i} attempt(s)"
+              exit 0
+            fi
+            echo "SSH not ready yet (attempt ${i}/30), retrying in 10s"
+            sleep 10
+          done
+          echo "SSH never became reachable" >&2
+          exit 1
+      - name: Copy Puppet manifests
+        run: |
+          scp -i ~/.ssh/deploy_key -o BatchMode=yes -r puppet \
+            "$SSH_USER@${{ steps.infra.outputs.ip }}:/tmp/puppet"
+      - name: Install Puppet
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$SSH_USER@${{ steps.infra.outputs.ip }}" \
+            'set -e
+             for i in $(seq 1 5); do
+               sudo apt-get update -y && break
+               echo "apt-get update failed (attempt $i/5), retrying"; sleep 15
+             done
+             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y puppet
+             puppet --version'
+      - name: Apply Puppet manifest
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_REF="ghcr.io/${REPO_LC}:${{ github.sha }}"
+
+          # The GHCR token is piped over stdin and read into the remote env by
+          # $(cat), so it never appears in the command string or process table.
+          set +e
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes \
+            "$SSH_USER@${{ steps.infra.outputs.ip }}" \
+            "FACTER_app_image='${IMAGE_REF}' FACTER_ghcr_user='${GHCR_USER}' \
+             FACTER_ghcr_token=\$(cat) \
+             sudo -E puppet apply /tmp/puppet/manifests/site.pp --detailed-exitcodes" \
+            <<< "$GHCR_TOKEN"
+          rc=$?
+          set -e
+
+          # --detailed-exitcodes: 0 = no change, 2 = changes applied (both OK);
+          # 4 and 6 mean resource failures and must fail the stage.
+          if [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
+            echo "Puppet apply succeeded (exit ${rc})"
+            exit 0
+          fi
+          echo "Puppet apply failed with exit ${rc}" >&2
+          exit "$rc"
+
+  - id: verify
+    kind: verify
+    needs: [configure]
+    timeout_minutes: 15
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: us-east-1
+    steps:
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: 'false'
+      - name: Smoke tests and health verification
+        run: |
+          cd infra
+          terraform init -input=false -reconfigure \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ secrets.PROJECT_NAME }}/terraform.tfstate" \
+            -backend-config="region=$AWS_REGION"
+          IP=$(terraform output -raw public_ip)
+
+          echo "--- smoke 1/3: GET /health reports UP ---"
+          curl --fail --show-error --retry 12 --retry-delay 15 --retry-all-errors \
+            -o /tmp/health.json "http://$IP/health"
+          cat /tmp/health.json
+          grep -q '"status":"UP"' /tmp/health.json
+
+          echo "--- smoke 2/3: GET /version reports build metadata ---"
+          curl --fail --show-error --retry 6 --retry-delay 10 --retry-all-errors \
+            -o /tmp/version.json "http://$IP/version"
+          cat /tmp/version.json
+          grep -q '"version"' /tmp/version.json
+          grep -q '"commit"' /tmp/version.json
+
+          echo "--- smoke 3/3: GET / serves the landing page ---"
+          curl --fail --show-error --silent --output /dev/null \
+            --retry 6 --retry-delay 10 --retry-all-errors "http://$IP/"
+
+          echo "All smoke tests passed against http://$IP"
+
+rollback:
+  strategy: rerun

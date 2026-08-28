@@ -1,0 +1,12 @@
+# udap:meta cloud=aws region=us-east-1 target=ec2-docker
+
+user: Developer / Monitor { udap-type: generic.user }
+ghcr: GHCR Image Registry { udap-type: generic.cdn }
+vpc: VPC (default) {
+  nginx: Nginx Reverse Proxy :80 { udap-type: generic.app }
+  app: Health Check Service :8080 (Docker) { udap-type: aws.ec2 }
+}
+
+user -> vpc.nginx: GET /health, /version
+vpc.nginx -> vpc.app: proxy_pass 127.0.0.1:8080
+ghcr -> vpc.app: docker pull image:sha
