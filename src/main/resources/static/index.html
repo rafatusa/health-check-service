@@ -6,32 +6,66 @@
   <meta name="description" content="Live status dashboard for the Health Check Service."/>
   <title>Health Check Service — Status</title>
   <style>
+    /* ------------------------------------------------------------------
+       Neumorphic ("soft UI") theme.
+
+       The whole language is: ONE background colour everywhere, and depth
+       comes only from a light shadow top-left plus a dark shadow
+       bottom-right. Raised surfaces use outer shadows; pressed surfaces
+       invert to inset. There are no borders anywhere.
+
+       Deliberate exceptions, because neumorphism is hostile to
+       accessibility and this is an operations dashboard:
+         - text colours keep WCAG AA contrast, not washed-out greys
+         - status colours stay saturated and are ALWAYS paired with a word
+         - :focus-visible keeps a hard 2px outline (a soft focus ring is
+           effectively no focus ring)
+       ------------------------------------------------------------------ */
     :root {
       color-scheme: light dark;
-      --bg: #0f172a;
-      --panel: #1e293b;
-      --border: #334155;
-      --border-hi: #64748b;
-      --text: #e2e8f0;
-      --muted: #aab8cc;          /* 7.0:1 on --panel — AA for body text */
-      --faint: #94a3b8;          /* 4.9:1 on --panel — AA, small meta only */
-      --accent: #7dd3fc;
-      --up: #22c55e;
-      --pending: #f59e0b;
-      --down: #ef4444;
+
+      /* Mid-tone slate: neumorphism cannot render on near-black. */
+      --bg: #2b3242;
+      --light: rgba(255, 255, 255, .07);   /* top-left highlight */
+      --dark: rgba(0, 0, 0, .45);          /* bottom-right shadow */
+
+      --text: #eef2f8;
+      --muted: #c3ccda;          /* 8.9:1 on --bg */
+      --faint: #a5b1c2;          /* 6.2:1 on --bg */
+      --accent: #7dd3fc;         /* 7.5:1 on --bg */
+
+      --up: #34d399;
+      --pending: #fbbf24;
+      --down: #f87171;
       --focus: #7dd3fc;
+
+      --r-lg: 1.25rem;
+      --r-md: .9rem;
+      --r-sm: .7rem;
+
+      /* raised / inset shadow pairs — the entire visual system */
+      --up-shadow:  6px 6px 14px var(--dark), -6px -6px 14px var(--light);
+      --up-shadow-sm: 4px 4px 9px var(--dark), -4px -4px 9px var(--light);
+      --in-shadow:  inset 5px 5px 11px var(--dark), inset -5px -5px 11px var(--light);
+      --in-shadow-sm: inset 3px 3px 7px var(--dark), inset -3px -3px 7px var(--light);
     }
+
     @media (prefers-color-scheme: light) {
       :root {
-        --bg: #f1f5f9;
-        --panel: #ffffff;
-        --border: #cbd5e1;
-        --border-hi: #94a3b8;
-        --text: #0f172a;
-        --muted: #475569;        /* 7.4:1 on white */
-        --faint: #64748b;        /* 5.1:1 on white */
-        --accent: #0369a1;
-        --focus: #0369a1;
+        /* Warm grey: neumorphism cannot render on pure white either. */
+        --bg: #e4e8ef;
+        --light: rgba(255, 255, 255, .95);
+        --dark: rgba(163, 173, 190, .65);
+
+        --text: #1b2333;
+        --muted: #46516a;        /* 8.1:1 on --bg */
+        --faint: #5c6880;        /* 5.4:1 on --bg */
+        --accent: #0b5f92;       /* 6.4:1 on --bg */
+
+        --up: #0f8a5f;
+        --pending: #9a6206;
+        --down: #c02626;
+        --focus: #0b5f92;
       }
     }
 
@@ -44,6 +78,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      /* single flat surface — every element is extruded from this */
       background: var(--bg);
       color: var(--text);
       line-height: 1.5;
@@ -54,30 +89,42 @@
     header { margin-bottom: 1.75rem; }
     h1 {
       font-size: 1.65rem;
-      margin: 0 0 .3rem;
+      margin: 0 0 .35rem;
       letter-spacing: -.01em;
       display: flex;
       align-items: center;
-      gap: .6rem;
+      gap: .85rem;
     }
     .sub { color: var(--muted); margin: 0; font-size: .95rem; }
 
     /* ---- status indicator ------------------------------------------- */
+    /* Extruded well holding a coloured light. The colour stays saturated
+       and is never the only signal — .status-word carries the same state. */
     .dot {
       flex: 0 0 auto;
-      width: .7rem;
-      height: .7rem;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 50%;
+      background: var(--bg);
+      box-shadow: var(--in-shadow-sm);
+      display: inline-grid;
+      place-items: center;
+    }
+    .dot::after {
+      content: "";
+      width: .62rem;
+      height: .62rem;
       border-radius: 50%;
       background: var(--pending);
-      box-shadow: 0 0 0 0 currentColor;
+      box-shadow: 0 0 9px 1px var(--pending);
     }
-    .dot[data-state="up"]      { background: var(--up); }
-    .dot[data-state="pending"] { background: var(--pending); animation: pulse 1.4s ease-in-out infinite; }
-    .dot[data-state="down"]    { background: var(--down); }
+    .dot[data-state="up"]::after      { background: var(--up);      box-shadow: 0 0 9px 1px var(--up); }
+    .dot[data-state="pending"]::after { background: var(--pending); box-shadow: 0 0 9px 1px var(--pending); animation: pulse 1.4s ease-in-out infinite; }
+    .dot[data-state="down"]::after    { background: var(--down);    box-shadow: 0 0 9px 1px var(--down); }
 
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
     @media (prefers-reduced-motion: reduce) {
-      .dot[data-state="pending"] { animation: none; }
+      .dot[data-state="pending"]::after { animation: none; }
       * { transition: none !important; }
     }
 
@@ -85,22 +132,29 @@
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
-      gap: .5rem;
-      margin: 0 0 1.5rem;
+      gap: .55rem;
+      margin: 0 0 1.6rem;
+      padding: .85rem 1.15rem;
+      border-radius: var(--r-md);
+      background: var(--bg);
+      box-shadow: var(--in-shadow-sm);
       font-size: .95rem;
     }
-    .status-word { font-weight: 600; }
+    .status-word { font-weight: 700; letter-spacing: .01em; }
     .status-word[data-state="up"]      { color: var(--up); }
     .status-word[data-state="pending"] { color: var(--pending); }
     .status-word[data-state="down"]    { color: var(--down); }
     .status-detail { color: var(--faint); font-size: .85rem; }
 
+    /* Errors get a soft inset well plus a saturated left rail — the rail
+       is what survives if shadows are not rendered at all. */
     .error {
-      margin: 0 0 1.5rem;
-      padding: .8rem 1rem;
-      border: 1px solid var(--down);
-      border-radius: .6rem;
-      background: color-mix(in srgb, var(--down) 12%, transparent);
+      margin: 0 0 1.6rem;
+      padding: .9rem 1.1rem;
+      border-radius: var(--r-md);
+      border-left: 4px solid var(--down);
+      background: var(--bg);
+      box-shadow: var(--in-shadow-sm);
       color: var(--text);
       font-size: .875rem;
     }
@@ -114,20 +168,20 @@
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-      gap: .75rem;
-      margin-bottom: 1.75rem;
+      gap: 1.1rem;
+      margin-bottom: 1.9rem;
     }
     .metric {
-      padding: .9rem 1rem;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: .6rem;
+      padding: 1.1rem 1.15rem;
+      background: var(--bg);
+      border-radius: var(--r-lg);
+      box-shadow: var(--up-shadow);
     }
     .metric dt {
-      margin: 0 0 .3rem;
+      margin: 0 0 .35rem;
       font-size: .72rem;
       text-transform: uppercase;
-      letter-spacing: .06em;
+      letter-spacing: .07em;
       color: var(--faint);
     }
     .metric dd {
@@ -147,46 +201,60 @@
     h2 {
       font-size: .78rem;
       text-transform: uppercase;
-      letter-spacing: .06em;
+      letter-spacing: .07em;
       color: var(--faint);
-      margin: 0 0 .6rem;
-      font-weight: 600;
+      margin: 0 0 .8rem;
+      font-weight: 700;
     }
+    /* Raised by default; presses INTO the surface on hover/active — the
+       core neumorphic interaction. */
     .card {
       display: block;
-      padding: .85rem 1.1rem;
-      margin-bottom: .6rem;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: .6rem;
+      padding: 1rem 1.2rem;
+      margin-bottom: 1rem;
+      background: var(--bg);
+      border-radius: var(--r-lg);
+      box-shadow: var(--up-shadow);
       text-decoration: none;
       color: inherit;
-      transition: border-color .15s;
+      transition: box-shadow .18s ease;
     }
-    .card:hover { border-color: var(--border-hi); }
+    .card:hover  { box-shadow: var(--in-shadow); }
+    .card:active { box-shadow: var(--in-shadow); }
     .ep {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: .92rem;
+      font-weight: 600;
       color: var(--accent);
+      display: block;
     }
-    .desc { color: var(--muted); font-size: .85rem; margin-top: .25rem; }
+    .desc { color: var(--muted); font-size: .85rem; margin-top: .3rem; display: block; }
 
     button {
       font: inherit;
+      font-weight: 600;
       color: var(--text);
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: .5rem;
-      padding: .45rem .9rem;
+      background: var(--bg);
+      border: 0;
+      border-radius: var(--r-md);
+      padding: .7rem 1.4rem;
       cursor: pointer;
-      transition: border-color .15s;
+      box-shadow: var(--up-shadow-sm);
+      transition: box-shadow .18s ease;
     }
-    button:hover { border-color: var(--border-hi); }
+    button:hover:not(:disabled)  { box-shadow: var(--in-shadow-sm); }
+    button:active:not(:disabled) { box-shadow: var(--in-shadow); }
+    button:disabled {
+      cursor: progress;
+      color: var(--faint);
+      box-shadow: var(--in-shadow-sm);
+    }
 
+    /* Deliberately NOT neumorphic: a soft focus ring is no focus ring. */
     :focus-visible {
       outline: 2px solid var(--focus);
-      outline-offset: 2px;
-      border-radius: .35rem;
+      outline-offset: 3px;
+      border-radius: var(--r-sm);
     }
 
     .sr-only {
@@ -196,16 +264,21 @@
     }
 
     footer {
-      margin-top: 2rem;
+      margin-top: 2.25rem;
+      padding: 1rem 1.15rem;
+      border-radius: var(--r-md);
+      background: var(--bg);
+      box-shadow: var(--in-shadow-sm);
       color: var(--faint);
       font-size: .8rem;
-      border-top: 1px solid var(--border);
-      padding-top: 1rem;
     }
 
     @media (max-width: 30rem) {
       main { padding: 1.75rem 1rem; }
       h1 { font-size: 1.35rem; }
+      .grid { gap: .9rem; }
+      /* soften shadow spread so tiles don't collide on narrow screens */
+      .metric, .card { box-shadow: var(--up-shadow-sm); }
     }
   </style>
 </head>
@@ -261,7 +334,7 @@
       </a>
     </div>
 
-    <p style="margin-top:1.25rem;">
+    <p style="margin-top:1.5rem;">
       <button type="button" id="refresh">Refresh now</button>
       <span class="sr-only" id="refresh-hint">Re-runs the health check immediately.</span>
     </p>
